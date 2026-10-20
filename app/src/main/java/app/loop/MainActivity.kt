@@ -105,7 +105,7 @@ class MainActivity : ComponentActivity() {
             )
         }
     ) {
-        tick.longValue
+        tick.value
         val w = size.width; val h = size.height; val l = e.L
         drawRect(Color(0xFF2A2F3A))
         if (t.data != null && l > 0) {
