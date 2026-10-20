@@ -31,6 +31,22 @@ class Engine {
     var lat by mutableFloatStateOf(0f)
     var aux by mutableFloatStateOf(0f)
     var info by mutableStateOf("запуск…")
+    var inputs by mutableStateOf<List<Pair<Int, String>>>(emptyList())
+    var wantIn by mutableIntStateOf(0)
+    var wiredFound by mutableStateOf(false)
+    @Volatile var rebuild = false
+    lateinit var am: AudioManager
+    val WIRED = setOf(AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_LINE_ANALOG, AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET)
+    fun refresh() {
+        val l = am.getDevices(AudioManager.GET_DEVICES_INPUTS)
+        inputs = l.map { it.id to "${it.productName} (тип ${it.type})" }
+        wiredFound = l.any { it.type in WIRED }
+    }
+    fun pickIn(id: Int) { wantIn = id; rebuild = true }
+    private fun inDev(): AudioDeviceInfo? {
+        val l = am.getDevices(AudioManager.GET_DEVICES_INPUTS)
+        return if (wantIn != 0) l.firstOrNull { it.id == wantIn } else l.firstOrNull { it.type in WIRED }
+    }
     @Volatile var L = 0
     @Volatile var pos = 0
     @Volatile var cur = -1
@@ -82,17 +98,21 @@ class Engine {
     fun start(am: AudioManager) {
         if (run) return
         val wired = setOf(AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_LINE_ANALOG, AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET)
-        val inD = am.getDevices(AudioManager.GET_DEVICES_INPUTS).firstOrNull { it.type in wired }
+        this.am = am; refresh()
+        am.registerAudioDeviceCallback(object : AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(a: Array<AudioDeviceInfo>) { refresh(); rebuild = true }
+            override fun onAudioDevicesRemoved(a: Array<AudioDeviceInfo>) { refresh(); rebuild = true }
+        }, null)
         val outD = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP }
-        val ar = AudioRecord.Builder().setAudioSource(MediaRecorder.AudioSource.MIC)
+        fun mkAr(): AudioRecord = AudioRecord.Builder().setAudioSource(MediaRecorder.AudioSource.MIC)
             .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_FLOAT).setSampleRate(SR).setChannelMask(AudioFormat.CHANNEL_IN_MONO).build())
-            .setBufferSizeInBytes(CH * 4 * 8).build()
+            .setBufferSizeInBytes(CH * 4 * 8).build().also { r -> inDev()?.let { r.setPreferredDevice(it) } }
+        var ar = mkAr()
         val ob = max(CH * 4 * 6, AudioTrack.getMinBufferSize(SR, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_FLOAT))
         val at = AudioTrack.Builder()
             .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
             .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_FLOAT).setSampleRate(SR).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
             .setBufferSizeInBytes(ob).setTransferMode(AudioTrack.MODE_STREAM).build()
-        if (inD != null) ar.setPreferredDevice(inD)
         if (outD != null) at.setPreferredDevice(outD)
         run = true
         Thread {
@@ -101,6 +121,7 @@ class Engine {
             ar.startRecording(); at.play()
             try {
                 while (run) {
+                    if (rebuild) { rebuild = false; ar.release(); ar = mkAr(); ar.startRecording(); shown = false }
                     var n = 0
                     while (n < CH) { val r = ar.read(inb, n, CH - n, AudioRecord.READ_BLOCKING); if (r < 0) return@Thread; n += r }
                     val l0 = L; val p = pos

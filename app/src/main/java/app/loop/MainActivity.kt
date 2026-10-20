@@ -47,6 +47,9 @@ class MainActivity : ComponentActivity() {
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text(e.info, color = Color.Gray, fontSize = 12.sp)
+        if (!e.wiredFound) Text("Android не видит проводной вход. Нужен 4-контактный (TRRS) кабель или переходник: обычный кабель телефон принимает только как выход.", color = Color(0xFFFFB020), fontSize = 12.sp)
+        FilterChip(e.wantIn == 0, { e.pickIn(0) }, label = { Text("Вход: авто") })
+        e.inputs.forEach { (id, n) -> FilterChip(e.wantIn == id, { e.pickIn(id) }, label = { Text(n) }) }
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             listOf(1f, .5f, .25f).forEach { s -> FilterChip(e.step == s, { e.step = s }, label = { Text("$s с") }) }
         }
